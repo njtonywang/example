@@ -11,6 +11,7 @@ from sklearn.neighbors import NearestNeighbors
 from shapely.geometry import Polygon, LineString
 import copy
 from dijkstar import Graph, find_path
+from scipy.spatial import ConvexHull
 
 
 def build_obstacle_course(obstacle_path, ax):
@@ -63,10 +64,36 @@ def add_start_and_goal(start_goal_path, ax):
     return start, goal
 
 
-def add_samples(n, ax, path):
+def add_samples(n, ax, path, convex_hulls):
     samples = []
-    # j = 0
-    i = 0
+
+    for shape in convex_hulls:
+        shape.sort(key=lambda x: x[0])  # sort by x coordinate
+        for i in range(len(shape) - 1):
+            if shape[i][0] == shape[i + 1][0]:
+                new_point = [shape[i][0], (shape[i][1] + shape[i + 1][1]) / 2]
+                samples.append(new_point)
+                new_point = [shape[i][0], 2 * (shape[i][1] + shape[i + 1][1]) / 3]
+                samples.append(new_point)
+                # new_point = [shape[i][0], 2 * (shape[i][1] + shape[i + 1][1]) / 5]
+                # samples.append(new_point)
+        shape.sort(key=lambda x: x[1])  # sort by x coordinate
+        for i in range(len(shape) - 1):
+            if shape[i][1] == shape[i + 1][1]:
+                new_point = [(shape[i][0] + shape[i + 1][0]) / 2, shape[i][1]]
+                samples.append(new_point)
+                new_point = [2 * (shape[i][0] + shape[i + 1][0]) / 3, shape[i][1]]
+                samples.append(new_point)
+                # new_point = [2 * (shape[i][0] + shape[i + 1][0]) / 5, shape[i][1]]
+                # samples.append(new_point)
+
+    for sample in samples:
+        if sample[0] > 600 or sample[1] > 600:
+            samples.remove(sample)
+
+    i = len(samples)
+    # print("samples", len(samples))
+    # randomly sample given number of points
     while i < n:
         x = random.randint(0, 600)
         y = random.randint(0, 600)
@@ -74,7 +101,6 @@ def add_samples(n, ax, path):
             samples.append([x, y])
             ax.add_patch(patches.Circle((x, y), 1, facecolor='xkcd:blue'))
             i += 1
-        # print(path.contains_points([(x, y)])[0])
     return samples
 
 
@@ -82,7 +108,7 @@ def connect_nearest_neighbors(samples, polygon):
     vertex = []
     edges = []
     X = np.array(samples)
-    nbrs = NearestNeighbors(n_neighbors=6, algorithm='ball_tree').fit(X)
+    nbrs = NearestNeighbors(n_neighbors=8, algorithm='ball_tree').fit(X)
     distances, indices = nbrs.kneighbors(X)
     for nq in indices:
         for i in range(1, len(nq)):
@@ -135,13 +161,13 @@ def add_start_goal(vertex, point, polygon, edges):
 
 
 def find_shortest_path(edges, vertex, s_i, e_i):
-    print(s_i)
+    # print(s_i)
     graph = Graph()
     for edge in edges:
         a = vertex.index(edge[0])
         b = vertex.index(edge[1])
         dist = np.linalg.norm(np.array(edge[0]) - np.array(edge[1]))
-        print(a, b, dist)
+        # print(a, b, dist)
         graph.add_edge(a, b, {'cost': dist})
         graph.add_edge(b, a, {'cost': dist})
     cost_func = lambda u, v, e, prev_e: e['cost']
@@ -151,6 +177,48 @@ def find_shortest_path(edges, vertex, s_i, e_i):
         point2 = vertex[shortest[i + 1]]
         plt.plot([point1[0], point2[0]], [point1[1], point2[1]], linewidth=2, color='g')
 
+
+def read_file(file_name):
+    l = []
+    with open(file_name, "r") as file:
+        for line in file:
+            l.append(line.strip())
+    return l
+
+
+def get_all_convex_hulls(l):
+    output = []
+    total_obs = int(float(l[0]))
+    line = 1
+    for i in range(total_obs):
+        vertices_count = int(float(l[line]))
+        line += 1
+        vertices = []
+        for j in range(vertices_count):  # 3 for triangle
+            pair = l[line].split()
+            pair[0] = float(pair[0])
+            pair[1] = float(pair[1])
+            vertices.append(pair)  # eachder (x,y) vertices pair
+            line += 1
+        hull_vertices = get_convex_hull(vertices)
+        output.append(hull_vertices)
+    return output
+
+
+# to get the vertices for one figure
+def get_convex_hull(vertices):
+    new_vertices = []
+    res = []
+    for vertice in vertices:
+        new_vertices.append([vertice[0] + 2, vertice[1] + 2])
+        new_vertices.append([vertice[0] + 2, vertice[1] - 2])
+        new_vertices.append([vertice[0] - 2, vertice[1] + 2])
+        new_vertices.append([vertice[0] - 2, vertice[1] - 2])
+    points = np.array(new_vertices)
+    hull = ConvexHull(points)
+    for i in range(points[hull.vertices, 0].size):
+        res.append([points[hull.vertices, 0].item(i), points[hull.vertices, 1].item(i)])
+    return res
 
 
 if __name__ == "__main__":
@@ -166,21 +234,29 @@ if __name__ == "__main__":
     path, polygon = build_obstacle_course(args.obstacle_path, ax)
     start, goal = add_start_and_goal(args.start_goal_path, ax)
 
-    samples = add_samples(500, ax, path)
+    # part2 improvement
+    obs_path = "./world_obstacles.txt"
+    l = read_file(obs_path)
+    convex_hulls = get_all_convex_hulls(l)
+    # print(convex_hulls)
+
+    samples = add_samples(175, ax, path, convex_hulls)
     edges, vertex = connect_nearest_neighbors(samples, polygon)
-    print(find_closest(vertex, start))
-    print(find_closest(vertex, goal))
+    # print(find_closest(vertex, start))
+    # print(find_closest(vertex, goal))
     # print(len(vertex))
-    print(len(edges))
+    # print(len(edges))
     vertex = list(set(vertex))
     edges = add_start_goal(vertex, start, polygon, edges)
     edges = add_start_goal(vertex, goal, polygon, edges)
     vertex.append(start)
     vertex.append(goal)
-    print(len(vertex))
-    print(vertex.index(goal))
+    # print(len(vertex))
+    # print(vertex.index(goal))
     find_shortest_path(edges, vertex, vertex.index(start), vertex.index(goal))
-    print(edges)
+    # print(edges)
     # print(samples)
     # print(polygon)
     plt.show()
+
+
