@@ -6,7 +6,8 @@ from matplotlib.path import Path
 import matplotlib.patches as patches
 import numpy as np
 import random, math
-from scipy.spatial import ConvexHull
+import sys
+
 import time
 from shapely.geometry import Point, LineString, Polygon
 
@@ -78,7 +79,9 @@ def rrt(start, goal, obstacles, plt, step_size=20, bias=0.05):
         goal: tuple(x, y)
         obstacles: a list of obstacle, each obstacle is a list of points [x,y]
     Output:
-        number of nodes in the tree: int
+        length of final path
+        number of nodes in the tree
+        number of iterations
     '''
     plt.ion()
     polygons = [Polygon(obs) for obs in obstacles]
@@ -87,7 +90,10 @@ def rrt(start, goal, obstacles, plt, step_size=20, bias=0.05):
     parent = {} # record parent node to draw path
     V.add(start)
     goal_p = Point(goal[0], goal[1])
+    num_iter = 0
+    path_length = 0
     while True:
+        num_iter += 1
         # sample random
         p_rand = goal
         if random.random() > bias:
@@ -134,12 +140,16 @@ def rrt(start, goal, obstacles, plt, step_size=20, bias=0.05):
     while True:
         p = parent[cur]
         plt.plot([cur[0], p[0]], [cur[1], p[1]], marker='.', color='r')
+        path_length += get_distance(cur, p)
         if p == start:
             break
         cur = p
     
     plt.ioff()
-    return len(V)
+    return path_length, len(V), num_iter
+
+def get_distance(p1, p2):
+    return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
 
 def is_intersect(line, polygons):
     '''
@@ -150,14 +160,16 @@ def is_intersect(line, polygons):
             return True
     return False
 
-def bi_rrt(start, goal, obstacles, plt, step_size=20, bias=0.05):
+def bi_rrt(start, goal, obstacles, plt, step_size=20, bias=0.05, connect_freq=1):
     '''
     Input:
         start: tuple(x, y)
         goal: tuple(x, y)
         obstacles: a list of obstacle, each obstacle is a list of points [x,y]
     Output:
-        number of nodes in the tree: int
+        length of final path
+        number of nodes in the tree
+        number of iterations
     '''
     plt.ion()
     polygons = [Polygon(obs) for obs in obstacles]
@@ -171,7 +183,11 @@ def bi_rrt(start, goal, obstacles, plt, step_size=20, bias=0.05):
     colors = ['b', 'g']
     cur_tree = 0
     path_node_1, path_node_2 = None, None
+    num_iter = 0
+    valid_iter = 0
+    path_length = 0
     while True:
+        num_iter += 1
         # sample random
         p_rand = goal
         if cur_tree == 1:
@@ -207,6 +223,12 @@ def bi_rrt(start, goal, obstacles, plt, step_size=20, bias=0.05):
         plt.plot([nearest_v[0], new_x], [nearest_v[1], new_y], marker='.', color=colors[cur_tree])
         plt.pause(0.01)
 
+        # control connect frequency
+        valid_iter += 1
+        if valid_iter % connect_freq != 0:
+            cur_tree = 1 - cur_tree # swap tree to grow
+            continue
+
         # find nearest in the other tree
         dist = float('inf')
         nearest_v = None
@@ -241,49 +263,50 @@ def bi_rrt(start, goal, obstacles, plt, step_size=20, bias=0.05):
                 dist = math.sqrt((extend_v[0]-new_x)**2 + (extend_v[1]-new_y)**2)
         else: # find the final solution
             plt.plot([nearest_v[0], new_x], [nearest_v[1], new_y], marker='.', color='r')
+            path_length += get_distance(nearest_v, new_v)
             path_node_1, path_node_2 = nearest_v, new_v
             break
         
-        cur_tree = 1 - cur_tree # exchange tree
+        cur_tree = 1 - cur_tree # swap tree to grow
 
     # plot path
     cur = path_node_1
-    while True:
+    while cur != start and cur != goal:
         p = parent[cur]
         plt.plot([cur[0], p[0]], [cur[1], p[1]], marker='.', color='r')
-        if p == start or p == goal:
-            break
+        path_length += get_distance(cur, p)
         cur = p
 
     cur = path_node_2
-    while True:
+    while cur != start and cur != goal:
         p = parent[cur]
         plt.plot([cur[0], p[0]], [cur[1], p[1]], marker='.', color='r')
+        path_length += get_distance(cur, p)
         if p == start or p == goal:
             break
         cur = p
     
     plt.ioff()
-    return len(V[0]) + len(V[1])
+    return path_length, len(V[0]) + len(V[1]), num_iter
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('obstacle_path',
-                        help="File path for obstacle set")
-    parser.add_argument('start_goal_path',
-                        help="File path for obstacle set")
-    args = parser.parse_args()
+
+    obstacle_path = sys.argv[1]
+    start_goal_path = sys.argv[2]
 
     fig, ax = plt.subplots()
 
-    path = build_obstacle_course(args.obstacle_path, ax)
-    start, goal = add_start_and_goal(args.start_goal_path, ax) # tuple (x, y)
+    path = build_obstacle_course(obstacle_path, ax)
+    start, goal = add_start_and_goal(start_goal_path, ax) # tuple (x, y)
 
-    obstacles = read_obstacles(args.obstacle_path)
+    obstacles = read_obstacles(obstacle_path)
 
-    rrt(start, goal, obstacles, plt, step_size=40, bias=0.05)
-
-    # bi_rrt(start, goal, obstacles, plt, step_size=40, bias=0.05)
+    arg_len = len(sys.argv)
+    if arg_len == 3 or sys.argv[3] == 'rrt':
+        rrt(start, goal, obstacles, plt, step_size=40, bias=0.05)
+    elif sys.argv[3] == 'bi-rrt':
+        bi_rrt(start, goal, obstacles, plt, step_size=40, bias=0.05, connect_freq=1)
+    else:
+        print('Wrong command format!')
 
     plt.show()
